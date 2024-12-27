@@ -1,78 +1,61 @@
 const fs = require("fs");
-const { Keypair } = require("@solana/web3.js");
 const bs58 = require("bs58");
 const prompt = require("prompt-sync")(); // For user input
+const { Keypair, VersionedTransaction } = require("@solana/web3.js");
 
-async function generateAndUseKeypairs() {
+async function sendLocalCreateBundle() {
   try {
-    // Step 1: Generate keypairs dynamically and store them in a JSON file
-    function generateKeypairs(numKeypairs) {
-      const keypairs = [];
-
-      for (let i = 0; i < numKeypairs; i++) {
-        const keypair = Keypair.generate(); // Generate a new keypair
-        const secretKeyBase58 = bs58.encode(keypair.secretKey); // Encode the secret key in base58
-        keypairs.push(secretKeyBase58); // Store the encoded secret key in the array
-      }
-
-      // Step 2: Write the keypairs to a JSON file (wallets.json)
-      fs.writeFileSync("./wallets.json", JSON.stringify(keypairs, null, 2));
-      console.log(
-        `${numKeypairs} keypairs generated and saved to wallets.json`
-      );
+    // Step 1: Load wallets from wallets.json
+    let wallets;
+    try {
+      wallets = JSON.parse(fs.readFileSync("./wallets.json", "utf8"));
+    } catch (error) {
+      console.error("Error reading or parsing wallets.json:", error.message);
+      return;
     }
 
-    // Step 3: Ask how many wallets to generate
-    const numKeypairs = parseInt(
-      prompt("Enter the number of wallets to generate (1-21): "),
-      10
+    // Ensure wallets.json has valid data
+    if (!Array.isArray(wallets) || wallets.length === 0) {
+      console.error("Invalid wallets.json: No wallet data found.");
+      return;
+    }
+
+    // Step 2: Prompt for number of wallets to use
+    const numWallets = parseInt(
+      prompt(`Enter the number of wallets to use (1-21): `)
     );
-    if (isNaN(numKeypairs) || numKeypairs < 1 || numKeypairs > 21) {
+    if (isNaN(numWallets) || numWallets < 1 || numWallets > 21) {
       console.error(
-        "Invalid input: The number of wallets must be between 1 and 21."
+        "Invalid input: Number of wallets must be between 1 and 21."
       );
       return;
     }
 
-    // Step 4: Generate keypairs and store them in the JSON file
-    generateKeypairs(numKeypairs);
-
-    // Step 5: Load the keypairs from wallets.json
-    const wallets = JSON.parse(fs.readFileSync("./wallets.json", "utf8"));
-
-    // Step 6: Validate if the number of keypairs is correct
-    if (!Array.isArray(wallets) || wallets.length !== numKeypairs) {
+    // Step 3: Validate and load the wallets
+    if (numWallets > wallets.length) {
       console.error(
-        "Error: The number of keypairs in wallets.json does not match the expected value."
+        `Not enough wallets in wallets.json. Found only ${wallets.length}.`
       );
       return;
     }
 
-    // Step 7: Load keypairs from the wallets.json file
-    const keypairs = wallets.map((secretKeyBase58) => {
-      const secretKey = bs58.decode(secretKeyBase58); // Decode the secret key from Base58
-      return Keypair.fromSecretKey(secretKey); // Create a Keypair object
-    });
+    const signerKeyPairs = wallets
+      .slice(0, numWallets)
+      .map((wallet) => Keypair.fromSecretKey(bs58.decode(wallet)));
 
-    // Step 8: Prompt for the number of wallets to use
-    const numWalletsToUse = parseInt(
-      prompt(`Enter the number of wallets to use (1-${numKeypairs}): `),
-      10
-    );
-    if (
-      isNaN(numWalletsToUse) ||
-      numWalletsToUse < 1 ||
-      numWalletsToUse > numKeypairs
-    ) {
-      console.error(
-        "Invalid input: The number of wallets to use must be between 1 and the total number of generated wallets."
-      );
-      return;
-    }
+    // Step 4: Prompt for token metadata
+    const tokenMetadata = {
+      name: prompt("Enter token name: "),
+      symbol: prompt("Enter token symbol: "),
+      description: prompt("Enter token description: "),
+      twitter: prompt("Enter Twitter URL: "),
+      telegram: prompt("Enter Telegram URL: "),
+      website: prompt("Enter Website URL: "),
+    };
 
-    // Step 9: Prompt for transaction amounts
+    // Step 5: Prompt for transaction amounts
     const transactionAmounts = [];
-    for (let i = 0; i < numWalletsToUse; i++) {
+    for (let i = 0; i < numWallets; i++) {
       const amount = parseFloat(
         prompt(`Enter the amount for Wallet ${i + 1} (in SOL): `)
       );
@@ -83,54 +66,141 @@ async function generateAndUseKeypairs() {
       transactionAmounts.push(amount);
     }
 
-    // Step 10: Prompt for token metadata
-    const tokenMetadata = {
-      name: prompt("Enter token name: "),
-      symbol: prompt("Enter token symbol: "),
-      description: prompt("Enter token description: "),
-      twitter: prompt("Enter token Twitter URL: "),
-      telegram: prompt("Enter token Telegram URL: "),
-      website: prompt("Enter token website URL: "),
-    };
+    // Step 6: Generate token metadata
+    const mintKeypair = Keypair.generate(); // Random token mint
+    // let tokenFile = fs.readFileSync("./example.png");
 
-    // Step 11: Process and log the information (e.g., prepare the transaction bundle)
+    let metadataResponse;
+    try {
+      metadataResponse = await fetch("https://pump.fun/api/ipfs", {
+        method: "POST",
+        body: formData,
+      });
+
+      // Check if the response is valid
+      if (!metadataResponse.ok) {
+        console.error(
+          "Failed to upload metadata, status code:",
+          metadataResponse.status
+        );
+        const errorText = await metadataResponse.text();
+        console.error("Error response body:", errorText);
+        return;
+      }
+
+      // Attempt to parse the response body as JSON
+      metadataResponseJSON = await metadataResponse.json();
+    } catch (error) {
+      console.error("Error parsing API response:", error.message);
+      if (metadataResponse) {
+        const responseText = await metadataResponse.text();
+        console.error("Raw response body:", responseText);
+      }
+      return;
+    }
+
+    // Step 7: Build bundledTxArgs dynamically
     const bundledTxArgs = [];
-    for (let i = 0; i < numWalletsToUse; i++) {
+
+    // Create transaction (signed by wallet 1)
+    bundledTxArgs.push({
+      publicKey: signerKeyPairs[0].publicKey.toBase58(),
+      action: "create",
+      tokenMetadata: {
+        name: tokenMetadata.name,
+        symbol: tokenMetadata.symbol,
+        uri: metadataResponseJSON.metadataUri,
+      },
+      mint: mintKeypair.publicKey.toBase58(),
+      denominatedInSol: "true",
+      amount: transactionAmounts[0],
+      slippage: 10,
+      priorityFee: 0.001,
+      pool: "pump",
+    });
+
+    // Create buy transactions (signed by wallets 2–n)
+    for (let i = 1; i < numWallets; i++) {
       bundledTxArgs.push({
-        publicKey: keypairs[i].publicKey.toBase58(),
-        action: i === 0 ? "create" : "buy", // First wallet creates, others buy
-        tokenMetadata:
-          i === 0
-            ? {
-                name: tokenMetadata.name,
-                symbol: tokenMetadata.symbol,
-                description: tokenMetadata.description,
-                twitter: tokenMetadata.twitter,
-                telegram: tokenMetadata.telegram,
-                website: tokenMetadata.website,
-              }
-            : undefined,
+        publicKey: signerKeyPairs[i].publicKey.toBase58(),
+        action: "buy",
+        tokenMetadata: undefined,
+        mint: mintKeypair.publicKey.toBase58(),
+        denominatedInSol: "true",
         amount: transactionAmounts[i],
         slippage: 10,
-        priorityFee: i === 0 ? 0.001 : 0.0,
+        priorityFee: 0.0,
         pool: "pump",
       });
     }
 
-    console.log("Bundled transaction arguments:", bundledTxArgs);
+    // Step 8: Send bundled transactions in batches of 5
+    const transactionBatches = [];
+    while (bundledTxArgs.length > 0) {
+      const batch = bundledTxArgs.splice(0, 5); // Take up to 5 transactions for each batch
+      transactionBatches.push(batch);
+    }
 
-    // You can now continue to process the transactions, sign them, and submit them as needed.
-    // For example, signing and submitting transactions to a Solana endpoint would follow here.
+    // Step 9: Sign each batch of transactions dynamically
+    let encodedSignedTransactions = [];
+    let signatures = [];
+    let currentSignerIndex = 0;
 
-    // Step 12: Return the keypairs and the transaction bundle
-    return {
-      keypairs,
-      bundledTxArgs,
-    };
+    for (
+      let batchIndex = 0;
+      batchIndex < transactionBatches.length;
+      batchIndex++
+    ) {
+      const batch = transactionBatches[batchIndex];
+      const signers = batch.map(
+        (_, idx) => signerKeyPairs[currentSignerIndex++]
+      );
+
+      const batchTxs = batch.map((txData) => {
+        const tx = new VersionedTransaction();
+        tx.add(txData);
+        return tx;
+      });
+
+      // Sign each transaction in the batch
+      batchTxs.forEach((tx, idx) => {
+        tx.sign(signers[idx]);
+        encodedSignedTransactions.push(bs58.encode(tx.serialize()));
+        signatures.push(bs58.encode(tx.signatures[0]));
+      });
+    }
+
+    // Step 10: Submit the transactions to Jito
+    try {
+      const jitoResponse = await fetch(
+        `https://mainnet.block-engine.jito.wtf/api/v1/bundles`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "sendBundle",
+            params: [encodedSignedTransactions],
+          }),
+        }
+      );
+
+      console.log(await jitoResponse.json());
+    } catch (e) {
+      console.error("Jito submission failed:", e.message);
+    }
+
+    // Step 11: Output transaction signatures
+    for (let i = 0; i < signatures.length; i++) {
+      console.log(`Transaction ${i}: https://solscan.io/tx/${signatures[i]}`);
+    }
   } catch (error) {
     console.error("Error:", error.message);
   }
 }
 
-// Execute the function
-generateAndUseKeypairs();
+// Call the function to execute the transaction process
+sendLocalCreateBundle();
