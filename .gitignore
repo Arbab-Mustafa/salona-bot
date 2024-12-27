@@ -1,0 +1,26 @@
+#  add all recomemded file here to ignore
+#  add all recomemded file here to ignore
+
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+*.pnp.js
+.pnp.cjs
+*.pnp.cjs
+*.env
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
